@@ -1,47 +1,35 @@
-name: Extract DTS from lk2nd image
+name: Extract DTS from lk2nd (Qualcomm DT)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   extract-dts:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
+      - name: Install tools
         run: |
           sudo apt update
           sudo apt install -y \
             binwalk \
             device-tree-compiler \
-            fdisk \
-            kpartx \
+            python3 \
             unzip
 
       - name: Download lk2nd image
         run: |
-          mkdir -p work
+          mkdir work
           cd work
           wget -O lk2nd.img \
             https://github.com/aksSuzumiya6666/redmi-4a-rolex-linux/releases/download/20240816/lk2nd-redmi4a.img
 
-      - name: Identify partitions
+      - name: Deep extract image (recursive)
         run: |
           cd work
-          fdisk -l lk2nd.img || true
+          binwalk -eM lk2nd.img
 
-      - name: Extract image using binwalk
-        run: |
-          cd work
-          binwalk -e lk2nd.img
-
-      - name: Locate DTB files
+      - name: Find all DTB files
         run: |
           cd work
           mkdir -p dtb
@@ -53,12 +41,30 @@ jobs:
           mkdir -p dts
           for f in dtb/*.dtb; do
             name=$(basename "$f" .dtb)
-            dtc -I dtb -O dts "$f" -o "dts/$name.dts"
+            dtc -I dtb -O dts "$f" -o "dts/$name.dts" || true
           done
 
-      - name: Upload DTS artifacts
+      - name: Extract touchscreen nodes
+        run: |
+          cd work
+          mkdir -p report
+          grep -Rni \
+            -e touchscreen \
+            -e goodix \
+            -e synaptics \
+            -e ft5x \
+            -e focaltech \
+            dts > report/touchscreen.txt || true
+
+      - name: Upload DTS
         uses: actions/upload-artifact@v4
         with:
-          name: extracted-dts
+          name: dts-files
           path: work/dts
+
+      - name: Upload touchscreen report
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchscreen-report
+          path: work/report
           
