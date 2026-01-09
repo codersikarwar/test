@@ -1,0 +1,90 @@
+name: Extract Touchscreen DTS from boot.img (rolex)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract-dts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            binwalk \
+            device-tree-compiler \
+            gzip \
+            python3
+
+      - name: Download boot.img
+        run: |
+          mkdir work
+          cd work
+          wget -O boot.img \
+            https://github.com/aksSuzumiya6666/redmi-4a-rolex-linux/releases/download/20240816/boot.img
+
+      - name: Extract boot image
+        run: |
+          cd work
+          binwalk -eM boot.img
+
+      - name: Locate kernel DTB
+        run: |
+          cd work
+          mkdir -p dtb
+
+          # find DTB blobs inside extracted kernel
+          find . -type f -size +1k -exec file {} \; | grep -i "device tree" || true
+          find . -type f -name "*.dtb" -exec cp {} dtb/ \; || true
+
+          ls -lh dtb || true
+
+      - name: Fallback: extract DTB from kernel binary
+        run: |
+          cd work
+          mkdir -p dtb_fallback
+
+          # scan kernel image for DTB magic (d00dfeed)
+          for f in $(find . -type f -name "*Image*" -o -name "*zImage*"); do
+            binwalk -y 'dtb' -e "$f" || true
+          done
+
+          find . -name "*.dtb" -exec cp {} dtb_fallback/ \; || true
+          ls -lh dtb_fallback || true
+
+      - name: Convert DTB to DTS
+        run: |
+          cd work
+          mkdir -p dts
+          for f in dtb/*.dtb dtb_fallback/*.dtb; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f" .dtb)
+            dtc -I dtb -O dts "$f" -o "dts/$name.dts"
+          done
+
+      - name: Extract touchscreen configuration
+        run: |
+          cd work
+          mkdir -p report
+          grep -Rni \
+            -e touchscreen \
+            -e goodix \
+            -e focaltech \
+            -e ft5x \
+            -e synaptics \
+            -e gt9 \
+            dts > report/touchscreen.txt || true
+
+      - name: Upload DTS files
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-dts
+          path: work/dts
+
+      - name: Upload touchscreen report
+        uses: actions/upload-artifact@v4
+        with:
+          name: touchscreen-report
+          path: work/report
+          
