@@ -1,4 +1,4 @@
-name: Extract DTS from lk2nd (QCDT aware)
+name: Extract DTS from lk2nd (rolex)
 
 on:
   workflow_dispatch:
@@ -8,58 +8,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install dependencies
+      - name: Install tools
         run: |
           sudo apt update
-          sudo apt install -y \
-            binwalk \
-            device-tree-compiler \
-            python3 \
-            wget
+          sudo apt install -y device-tree-compiler binwalk
 
       - name: Download lk2nd image
         run: |
-          mkdir -p work
+          mkdir work
           cd work
           wget -O lk2nd.img \
             https://github.com/aksSuzumiya6666/redmi-4a-rolex-linux/releases/download/20240816/lk2nd-redmi4a.img
 
-      - name: Extract Qualcomm DT container offset
-        run: |
-          cd work
-          binwalk lk2nd.img > binwalk.txt
-          grep "Qualcomm device tree container" binwalk.txt
-
-      - name: Extract DTBs from QCDT
+      - name: Extract DTBs using known offsets
         run: |
           cd work
           mkdir -p dtb
-          python3 << 'EOF'
-import struct
 
-img = open("lk2nd.img", "rb")
-img.seek(0x23000)  # QCDT offset from binwalk
+          # Small DTBs
+          dd if=lk2nd.img of=dtb/dtb_223a7.dtb bs=1 skip=140199 count=434
+          dd if=lk2nd.img of=dtb/dtb_22559.dtb bs=1 skip=140633 count=1240
+          dd if=lk2nd.img of=dtb/dtb_22a31.dtb bs=1 skip=141873 count=719
+          dd if=lk2nd.img of=dtb/dtb_23800.dtb bs=1 skip=145408 count=1240
+          dd if=lk2nd.img of=dtb/dtb_24000.dtb bs=1 skip=147456 count=434
+          dd if=lk2nd.img of=dtb/dtb_24800.dtb bs=1 skip=149504 count=719
 
-magic = img.read(4)
-if magic != b"QCDT":
-    raise SystemExit("Not a QCDT container")
-
-img.seek(12)
-count = struct.unpack(">I", img.read(4))[0]
-
-img.seek(32)
-for i in range(count):
-    entry = img.read(20)
-    _, _, _, _, offset, size = struct.unpack(">6I", entry)
-    cur = img.tell()
-    img.seek(offset)
-    dtb = img.read(size)
-    with open(f"dtb/qcdt_{i}.dtb", "wb") as f:
-        f.write(dtb)
-    img.seek(cur)
-
-print(f"Extracted {count} DTBs")
-EOF
+          ls -lh dtb
 
       - name: Convert DTB to DTS
         run: |
@@ -70,7 +44,7 @@ EOF
             dtc -I dtb -O dts "$f" -o "dts/$name.dts"
           done
 
-      - name: Generate touchscreen report
+      - name: Extract touchscreen configuration
         run: |
           cd work
           mkdir -p report
@@ -78,8 +52,8 @@ EOF
             -e touchscreen \
             -e goodix \
             -e focaltech \
-            -e synaptics \
             -e ft5x \
+            -e synaptics \
             dts > report/touchscreen.txt || true
 
       - name: Upload DTS files
