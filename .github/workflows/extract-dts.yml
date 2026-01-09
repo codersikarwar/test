@@ -1,4 +1,4 @@
-name: Extract DTS from lk2nd (Qualcomm DT)
+name: Extract DTS from lk2nd (QCDT aware)
 
 on:
   workflow_dispatch:
@@ -8,32 +8,58 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install tools
+      - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y \
             binwalk \
             device-tree-compiler \
             python3 \
-            unzip
+            wget
 
       - name: Download lk2nd image
         run: |
-          mkdir work
+          mkdir -p work
           cd work
           wget -O lk2nd.img \
             https://github.com/aksSuzumiya6666/redmi-4a-rolex-linux/releases/download/20240816/lk2nd-redmi4a.img
 
-      - name: Deep extract image (recursive)
+      - name: Extract Qualcomm DT container offset
         run: |
           cd work
-          binwalk -eM lk2nd.img
+          binwalk lk2nd.img > binwalk.txt
+          grep "Qualcomm device tree container" binwalk.txt
 
-      - name: Find all DTB files
+      - name: Extract DTBs from QCDT
         run: |
           cd work
           mkdir -p dtb
-          find . -type f -name "*.dtb" -exec cp {} dtb/ \;
+          python3 << 'EOF'
+import struct
+
+img = open("lk2nd.img", "rb")
+img.seek(0x23000)  # QCDT offset from binwalk
+
+magic = img.read(4)
+if magic != b"QCDT":
+    raise SystemExit("Not a QCDT container")
+
+img.seek(12)
+count = struct.unpack(">I", img.read(4))[0]
+
+img.seek(32)
+for i in range(count):
+    entry = img.read(20)
+    _, _, _, _, offset, size = struct.unpack(">6I", entry)
+    cur = img.tell()
+    img.seek(offset)
+    dtb = img.read(size)
+    with open(f"dtb/qcdt_{i}.dtb", "wb") as f:
+        f.write(dtb)
+    img.seek(cur)
+
+print(f"Extracted {count} DTBs")
+EOF
 
       - name: Convert DTB to DTS
         run: |
@@ -41,22 +67,22 @@ jobs:
           mkdir -p dts
           for f in dtb/*.dtb; do
             name=$(basename "$f" .dtb)
-            dtc -I dtb -O dts "$f" -o "dts/$name.dts" || true
+            dtc -I dtb -O dts "$f" -o "dts/$name.dts"
           done
 
-      - name: Extract touchscreen nodes
+      - name: Generate touchscreen report
         run: |
           cd work
           mkdir -p report
           grep -Rni \
             -e touchscreen \
             -e goodix \
+            -e focaltech \
             -e synaptics \
             -e ft5x \
-            -e focaltech \
             dts > report/touchscreen.txt || true
 
-      - name: Upload DTS
+      - name: Upload DTS files
         uses: actions/upload-artifact@v4
         with:
           name: dts-files
