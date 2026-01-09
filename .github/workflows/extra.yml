@@ -29,34 +29,32 @@ jobs:
           cd work
           binwalk -eM boot.img
 
-      - name: Locate kernel DTB
+      - name: Extract DTBs from extracted files
         run: |
           cd work
           mkdir -p dtb
 
-          # find DTB blobs inside extracted kernel
-          find . -type f -size +1k -exec file {} \; | grep -i "device tree" || true
           find . -type f -name "*.dtb" -exec cp {} dtb/ \; || true
-
           ls -lh dtb || true
 
-      - name: Fallback: extract DTB from kernel binary
+      - name: Fallback: scan kernel image for DTB
         run: |
           cd work
           mkdir -p dtb_fallback
 
-          # scan kernel image for DTB magic (d00dfeed)
-          for f in $(find . -type f -name "*Image*" -o -name "*zImage*"); do
-            binwalk -y 'dtb' -e "$f" || true
+          find . -type f \( -name "*Image*" -o -name "*zImage*" \) | while read f; do
+            echo "Scanning $f"
+            binwalk -e "$f" || true
           done
 
-          find . -name "*.dtb" -exec cp {} dtb_fallback/ \; || true
+          find . -type f -name "*.dtb" -exec cp {} dtb_fallback/ \; || true
           ls -lh dtb_fallback || true
 
       - name: Convert DTB to DTS
         run: |
           cd work
           mkdir -p dts
+
           for f in dtb/*.dtb dtb_fallback/*.dtb; do
             [ -f "$f" ] || continue
             name=$(basename "$f" .dtb)
@@ -67,6 +65,7 @@ jobs:
         run: |
           cd work
           mkdir -p report
+
           grep -Rni \
             -e touchscreen \
             -e goodix \
