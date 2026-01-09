@@ -1,0 +1,64 @@
+name: Extract DTS from lk2nd image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  extract-dts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            binwalk \
+            device-tree-compiler \
+            fdisk \
+            kpartx \
+            unzip
+
+      - name: Download lk2nd image
+        run: |
+          mkdir -p work
+          cd work
+          wget -O lk2nd.img \
+            https://github.com/aksSuzumiya6666/redmi-4a-rolex-linux/releases/download/20240816/lk2nd-redmi4a.img
+
+      - name: Identify partitions
+        run: |
+          cd work
+          fdisk -l lk2nd.img || true
+
+      - name: Extract image using binwalk
+        run: |
+          cd work
+          binwalk -e lk2nd.img
+
+      - name: Locate DTB files
+        run: |
+          cd work
+          mkdir -p dtb
+          find . -type f -name "*.dtb" -exec cp {} dtb/ \;
+
+      - name: Convert DTB to DTS
+        run: |
+          cd work
+          mkdir -p dts
+          for f in dtb/*.dtb; do
+            name=$(basename "$f" .dtb)
+            dtc -I dtb -O dts "$f" -o "dts/$name.dts"
+          done
+
+      - name: Upload DTS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: extracted-dts
+          path: work/dts
+          
